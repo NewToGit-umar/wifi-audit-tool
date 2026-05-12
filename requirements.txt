@@ -1,0 +1,20 @@
+# Core dependencies
+scapy>=2.4.5
+numpy>=1.21.0
+pyperclip>=1.8.2
+Pillow>=9.0.0
+
+# GUI enhancements (optional)
+pyqt5>=5.15.0  # Alternative to tkinter
+ttkbootstrap>=1.10.0
+
+# Reporting
+reportlab>=3.6.0  # PDF generation
+jinja2>=3.0.0     # HTML templates
+
+# Database
+sqlalchemy>=1.4.0
+
+# Additional utilities
+colorama>=0.4.4
+psutil>=5.9.0

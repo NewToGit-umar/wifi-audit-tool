@@ -1,0 +1,7 @@
+﻿__pycache__/
+*.pyc
+*.cap
+logs/
+captures/
+wordlists/
+

@@ -1,0 +1,30 @@
+{
+    "general": {
+        "theme": "dark",
+        "auto_save_logs": true,
+        "max_log_size_mb": 10,
+        "language": "en"
+    },
+    "scanning": {
+        "default_scan_time": 30,
+        "show_hidden_networks": true,
+        "min_signal": -80,
+        "channels": [1, 6, 11]
+    },
+    "capture": {
+        "deauth_packets": 5,
+        "capture_timeout": 60,
+        "auto_stop_on_handshake": true
+    },
+    "cracking": {
+        "default_tool": "hashcat",
+        "hashcat_mode": 22000,
+        "wordlist_path": "/usr/share/wordlists/rockyou.txt",
+        "max_cracking_time": 3600
+    },
+    "wps": {
+        "pixie_attack": true,
+        "bruteforce_delay": 1,
+        "max_attempts": 100
+    }
+}
