@@ -1,0 +1,46 @@
+#!/bin/bash
+# W1F1_Pwn (Auto-Hack Tool) Auto-Installer & Runner
+echo "W1F1_Pwn (Auto-Hack Tool) initialization..."
+
+if [ "$EUID" -ne 0 ]; then 
+    echo "Please run as root (e.g. sudo bash wifi-audit-tool)"
+    exit 1
+fi
+
+INSTALL_DIR=$(pwd)
+
+if [ ! -f "/usr/local/bin/wifi-audit-tool" ]; then
+    echo "[*] First time setup detected. Installing requirements (this might take a moment)..."
+    apt-get update -qq
+    apt-get install -y aircrack-ng hashcat hcxtools crunch reaver pixiewps network-manager python3-pyqt5 python3-pip git xterm -qq
+    pip3 install -r requirements.txt --break-system-packages 2>/dev/null || pip3 install -r requirements.txt
+    
+    mkdir -p captures wordlists logs
+
+    if [ -f "/usr/share/wordlists/rockyou.txt.gz" ]; then
+        gunzip -k /usr/share/wordlists/rockyou.txt.gz 2>/dev/null
+        ln -sf /usr/share/wordlists/rockyou.txt wordlists/rockyou.txt
+    elif [ -f "/usr/share/wordlists/rockyou.txt" ]; then
+        ln -sf /usr/share/wordlists/rockyou.txt wordlists/rockyou.txt
+    else
+        touch wordlists/rockyou.txt
+    fi
+
+    chmod +x app.py
+
+    echo "[*] Creating global wrapper..."
+    cat <<EOF > /usr/local/bin/wifi-audit-tool
+#!/bin/bash
+if [ "\\$EUID" -ne 0 ]; then
+  echo "Please run as root (sudo wifi-audit-tool)"
+  exit 1
+fi
+cd "$INSTALL_DIR"
+python3 app.py "\\$@"
+EOF
+    chmod +x /usr/local/bin/wifi-audit-tool
+    echo "[+] Setup complete! In the future you can run this tool from anywhere by typing: sudo wifi-audit-tool"
+fi
+
+# Run the app automatically right now
+python3 app.py "$@"
