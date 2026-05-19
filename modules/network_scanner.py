@@ -4,6 +4,21 @@ import sys
 
 class NetworkScanner:
     @staticmethod
+    def get_interfaces():
+        """Get available network interfaces."""
+        try:
+            result = subprocess.run(["ip", "link", "show"], capture_output=True, text=True, check=True)
+            interfaces = []
+            for line in result.stdout.split('\n'):
+                if ':' in line and not line.startswith(' '):
+                    iface = line.split(':')[1].strip()
+                    if iface and not iface.startswith('lo'):
+                        interfaces.append(iface)
+            return interfaces
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return []
+
+    @staticmethod
     def scan_networks():
         """Scans for WiFi networks cross-platform."""
         if sys.platform == 'win32':
