@@ -227,7 +227,8 @@ class CrackerTab(QWidget):
         """Launch CUPP custom wordlist generator with proper path handling"""
         try:
             # Get absolute path to cupp.py
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            # __file__ is in gui/, so go up 2 levels to reach project root
+            project_root = os.path.dirname(os.path.dirname(__file__))
             cupp_path = os.path.join(project_root, "modules", "cupp", "cupp.py")
             
             if not os.path.exists(cupp_path):
