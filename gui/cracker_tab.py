@@ -125,7 +125,7 @@ class CrackerTab(QWidget):
         scan_group = QGroupBox("2. Target Selection")
         scan_layout = QVBoxLayout()
         
-        self.btn_scan = QPushButton("?? Auto Scan Networks")
+        self.btn_scan = QPushButton("Auto Scan Networks")
         self.btn_scan.clicked.connect(self.scan_networks)
         scan_layout.addWidget(self.btn_scan)
         
@@ -172,7 +172,7 @@ class CrackerTab(QWidget):
         attack_group = QGroupBox("4. Execute Attack")
         attack_layout = QVBoxLayout()
         
-        self.btn_attack = QPushButton("? LAUNCH REAL ATTACK")
+        self.btn_attack = QPushButton("LAUNCH REAL ATTACK")
         self.btn_attack.setStyleSheet("background-color: #330000; color: #ff0000; font-weight: bold; border: 2px solid red; padding: 8px;")
         self.btn_attack.clicked.connect(self.start_attack)
         attack_layout.addWidget(self.btn_attack)
