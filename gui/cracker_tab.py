@@ -10,6 +10,18 @@ from modules.network_scanner import NetworkScanner
 from modules.handshake_capture import HandshakeCapture
 from modules.password_cracker import PasswordCracker
 
+class ScannerThread(QThread):
+    """Async thread for network scanning to keep UI responsive"""
+    scan_complete = pyqtSignal(list)
+    scan_error = pyqtSignal(str)
+
+    def run(self):
+        try:
+            networks = NetworkScanner.scan_networks()
+            self.scan_complete.emit(networks)
+        except Exception as e:
+            self.scan_error.emit(str(e))
+
 class RealAttackThread(QThread):
     log_signal = pyqtSignal(str)
     finished_signal = pyqtSignal()
@@ -90,6 +102,7 @@ class CrackerTab(QWidget):
         super().__init__()
         self.setup_ui()
         self.attack_thread = None
+        self.scan_thread = None
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -182,27 +195,63 @@ class CrackerTab(QWidget):
             self.combo_interface.addItem(iface)
 
     def scan_networks(self):
+        """Scan networks in a separate thread to keep UI responsive"""
         self.terminal.setText("[*] Scanning networks...")
         self.table.setRowCount(0)
-        nets = NetworkScanner.scan_networks()
-        for net in nets:
+        self.btn_scan.setEnabled(False)
+        
+        self.scan_thread = ScannerThread()
+        self.scan_thread.scan_complete.connect(self._on_scan_complete)
+        self.scan_thread.scan_error.connect(self._on_scan_error)
+        self.scan_thread.start()
+
+    def _on_scan_complete(self, networks):
+        """Handle scan completion"""
+        for net in networks:
             row = self.table.rowCount()
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(net["ssid"]))
             self.table.setItem(row, 1, QTableWidgetItem(net["bssid"]))
             self.table.setItem(row, 2, QTableWidgetItem(net.get("ch", "N/A")))
             self.table.setItem(row, 3, QTableWidgetItem(net["pwr"]))
-        self.terminal.append(f"[+] Found {len(nets)} networks.")
+        
+        self.terminal.append(f"[+] Found {len(networks)} networks.")
+        self.btn_scan.setEnabled(True)
+
+    def _on_scan_error(self, error):
+        """Handle scan error"""
+        self.terminal.setText(f"[!] Scan Error: {error}")
+        self.btn_scan.setEnabled(True)
 
     def launch_cupp(self):
+        """Launch CUPP custom wordlist generator with proper path handling"""
         try:
+            # Get absolute path to cupp.py
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            cupp_path = os.path.join(project_root, "modules", "cupp", "cupp.py")
+            
+            if not os.path.exists(cupp_path):
+                self.terminal.append(f"[!] Error: CUPP not found at {cupp_path}")
+                return
+            
+            # Use current Python executable
+            python_exe = sys.executable
+            
             if sys.platform == "win32":
-                subprocess.Popen(["cmd.exe", "/c", "start", "python", "modules/cupp/cupp.py", "-i"])
+                # Windows: Use cmd with pythonw or open separate window
+                subprocess.Popen([python_exe, cupp_path, "-i"], 
+                                creationflags=subprocess.CREATE_NEW_CONSOLE)
             else:
-                subprocess.Popen(["xterm", "-e", "python3", "modules/cupp/cupp.py", "-i"])
-            self.terminal.append("[+] Launched CUPP in terminal.")
+                # Linux: Use xterm if available, otherwise run in background
+                try:
+                    subprocess.Popen(["xterm", "-e", python_exe, cupp_path, "-i"])
+                except FileNotFoundError:
+                    # Fallback: run in background if xterm not available
+                    subprocess.Popen([python_exe, cupp_path, "-i"])
+            
+            self.terminal.append("[+] Launched CUPP wordlist generator in new terminal.")
         except Exception as e:
-            self.terminal.append(f"[!] Error: {e}")
+            self.terminal.append(f"[!] Error launching CUPP: {e}")
 
     def browse_wordlist(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Wordlist", "/", "Text Files (*.txt)")
