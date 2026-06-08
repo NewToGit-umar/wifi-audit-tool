@@ -1,4 +1,9 @@
 import sys
+import os
+
+# CRITICAL FIX: Add project root to Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 from gui.main_window import MainWindow
@@ -10,7 +15,7 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     
-    # Hacker Theme Styling
+    # Hacker Theme Styling (your original)
     hacker_style = """
         * {
             background-color: #000000;

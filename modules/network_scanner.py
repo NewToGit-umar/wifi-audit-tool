@@ -29,27 +29,44 @@ class NetworkScanner:
     @staticmethod
     def _scan_linux():
         try:
-            # nmcli -t -f BSSID,FREQ,SIGNAL,SECURITY,SSID dev wifi
-            result = subprocess.run(["nmcli", "-t", "-f", "BSSID,SIGNAL,SECURITY,SSID,CHAN", "dev", "wifi"], 
-                                    capture_output=True, text=True, check=True)
+            # Try airodump-ng first (more reliable for auditing)
+            try:
+                subprocess.run(["airodump-ng", "--output-format", "csv", "-w", "/tmp/scan_temp", 
+                              "--write-interval", "1", "--run-time", "6", "wlan0"], 
+                             timeout=8, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except:
+                pass
+
+            # Fallback to nmcli
+            result = subprocess.run(["nmcli", "-t", "-f", "BSSID,SIGNAL,SECURITY,SSID,CHAN", 
+                                   "dev", "wifi"], 
+                                  capture_output=True, text=True, timeout=8)
             output = result.stdout
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            return [{"ssid": "Error (Need nmcli)", "bssid": "N/A", "enc": "N/A", "pwr": "N/A", "ch": "N/A"}]
+        except:
+            return [{"ssid": "Scan failed - run as root", "bssid": "N/A", "enc": "N/A", "pwr": "N/A", "ch": "N/A"}]
 
         networks = []
         for line in output.split('\n'):
-            if not line.strip(): continue
+            if not line.strip(): 
+                continue
             parts = line.split(':')
-            if len(parts) >= 8: # nmcli escapes colons in MAC addresses, splitting gives more parts
-                # Reconstruct MAC
-                bssid = ":".join(parts[0:6])
-                pwr = parts[6]
-                enc = parts[7]
-                ssid = parts[8] if len(parts) > 8 else "<Hidden>"
-                ch = parts[9] if len(parts) > 9 else "0"
-                networks.append({"ssid": ssid, "bssid": bssid, "enc": enc, "pwr": pwr, "ch": ch})
-        return networks
-
+            if len(parts) >= 4:
+                try:
+                    bssid = ":".join(parts[:6])
+                    signal = parts[6] if len(parts) > 6 else "N/A"
+                    security = parts[7] if len(parts) > 7 else "WPA2"
+                    ssid = ":".join(parts[8:]) if len(parts) > 8 else "<Hidden>"
+                    ch = "N/A"
+                    networks.append({
+                        "ssid": ssid,
+                        "bssid": bssid,
+                        "enc": security,
+                        "pwr": signal,
+                        "ch": ch
+                    })
+                except:
+                    continue
+        return networks[:20]  # Limit results
     @staticmethod
     def _scan_windows():
         try:

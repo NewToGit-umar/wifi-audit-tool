@@ -7,7 +7,7 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-INSTALL_DIR=$(pwd)
+INSTALL_DIR=$(cd "$(dirname "$0")" && pwd)
 
 if [ ! -f "/usr/local/bin/wifi-audit-tool" ]; then
     echo "[*] First time setup detected. Installing requirements (this might take a moment)..."
