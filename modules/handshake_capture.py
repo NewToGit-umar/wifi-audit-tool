@@ -7,35 +7,40 @@ class HandshakeCapture:
         self.interface = interface
         self.bssid = bssid
         self.channel = str(channel)
-        self.output_dir = output_dir
         self.output_file = os.path.join(output_dir, f"capture-{bssid.replace(':', '')}")
         self.airodump_proc = None
-        self.mon_interface = None
+        self.aireplay_proc = None
+        self.monitor_iface = None  # New: track monitor interface
 
-    def enable_monitor_mode(self):
-        """Enable monitor mode - CRITICAL FIX"""
+    def _enable_monitor_mode(self):
+        """Put interface into monitor mode using airmon-ng."""
         try:
             # Kill interfering processes
-            subprocess.run(["airmon-ng", "check", "kill"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["airmon-ng", "check", "kill"], capture_output=True, text=True)
             
+            # Start monitor mode
             result = subprocess.run(["airmon-ng", "start", self.interface], 
-                                  capture_output=True, text=True, check=True)
+                                  capture_output=True, text=True, timeout=15)
             
-            # Extract monitor interface
+            # Extract monitor interface name (usually wlan0mon or wlan0)
             for line in result.stdout.splitlines():
-                if "mon" in line:
-                    self.mon_interface = line.split()[0]
+                if "mon" in line or "monitor" in line.lower():
+                    self.monitor_iface = line.strip().split()[-1] if line.strip() else self.interface + "mon"
                     break
-            if not self.mon_interface:
-                self.mon_interface = f"{self.interface}mon"
-            return self.mon_interface
+            if not self.monitor_iface:
+                self.monitor_iface = self.interface + "mon"  # fallback
+            
+            print(f"[+] Monitor mode enabled on {self.monitor_iface}")
+            return self.monitor_iface
         except Exception as e:
-            raise Exception(f"Failed to put interface in monitor mode: {e}")
+            print(f"[!] Monitor mode failed: {e}. Trying without...")
+            return self.interface
 
     def start_capture(self):
-        """Start airodump-ng in monitor mode"""
+        """Start airodump-ng (with monitor mode)."""
         try:
-            mon_iface = self.enable_monitor_mode()
+            mon_iface = self._enable_monitor_mode()
+            self.interface = mon_iface  # Update to monitor interface
             
             cmd = [
                 "airodump-ng",
@@ -45,14 +50,7 @@ class HandshakeCapture:
                 "--output-format", "cap",
                 mon_iface
             ]
-            
-            self.airodump_proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            time.sleep(3)  # Let airodump start
+            self.airodump_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             return True
         except Exception as e:
             raise Exception(f"Failed to start airodump-ng: {e}")
