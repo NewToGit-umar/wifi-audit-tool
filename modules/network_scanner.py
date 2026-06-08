@@ -1,106 +1,116 @@
 ﻿import subprocess
 import re
 import sys
+import os
 
 class NetworkScanner:
     @staticmethod
     def get_interfaces():
-        """Get available network interfaces."""
+        """Get wireless interfaces."""
         try:
-            result = subprocess.run(["ip", "link", "show"], capture_output=True, text=True, check=True)
+            # Prefer wireless interfaces
+            result = subprocess.run(["iwconfig"], capture_output=True, text=True, timeout=10)
             interfaces = []
-            for line in result.stdout.split('\n'):
-                if ':' in line and not line.startswith(' '):
-                    iface = line.split(':')[1].strip()
-                    if iface and not iface.startswith('lo'):
+            for line in result.stdout.splitlines():
+                if "no wireless extensions" not in line and ":" in line:
+                    iface = line.split()[0].strip()
+                    if iface:
                         interfaces.append(iface)
-            return interfaces
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            return []
+            if not interfaces:
+                # fallback
+                result = subprocess.run(["ip", "link", "show"], capture_output=True, text=True)
+                for line in result.stdout.split('\n'):
+                    if ':' in line and not line.startswith(' '):
+                        iface = line.split(':')[1].strip().split()[0]
+                        if iface and not iface.startswith(('lo', 'eth', 'enp')):
+                            interfaces.append(iface)
+            return interfaces or ["wlan0"]
+        except:
+            return ["wlan0"]
 
     @staticmethod
     def scan_networks():
-        """Scans for WiFi networks cross-platform."""
         if sys.platform == 'win32':
             return NetworkScanner._scan_windows()
-        else:
-            return NetworkScanner._scan_linux()
+        return NetworkScanner._scan_linux()
 
     @staticmethod
     def _scan_linux():
-        """Improved Linux scan with robust parsing + iwlist fallback."""
         networks = []
         try:
-            # Try nmcli first
+            # Primary: Try nmcli (works without monitor mode)
             result = subprocess.run(
-                ["nmcli", "-f", "BSSID,SSID,CHAN,SIGNAL,SECURITY", "dev", "wifi", "--terse"],
-                capture_output=True, text=True, timeout=15
+                ["nmcli", "-t", "-f", "SSID,BSSID,CHAN,SIGNAL", "dev", "wifi"],
+                capture_output=True, text=True, timeout=12, check=False
             )
-            if result.returncode == 0:
-                output = result.stdout
-                for line in output.strip().split('\n'):
-                    if not line or line.startswith('BSSID'): continue
-                    # Robust extraction with regex
-                    bssid_match = re.search(r'([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})', line)
-                    bssid = bssid_match.group(1) if bssid_match else "N/A"
-                    
-                    ch_match = re.search(r'CHAN:(\d+)', line) or re.search(r':(\d+):', line)
-                    ch = ch_match.group(1) if ch_match else "N/A"
-                    
-                    signal_match = re.search(r'SIGNAL:(\d+)', line)
-                    pwr = signal_match.group(1) if signal_match else "N/A"
-                    
-                    ssid_match = re.search(r'SSID:([^:]+?)(?=:SECURITY:|$|:\d+)', line)
-                    ssid = ssid_match.group(1).strip() if ssid_match else "<Hidden>"
-                    
-                    networks.append({
-                        "ssid": ssid or "<Hidden>",
-                        "bssid": bssid,
-                        "enc": "WPA/WPA2",  # simplified
-                        "pwr": pwr,
-                        "ch": ch
-                    })
-        except Exception:
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().split('\n'):
+                    if not line or "SSID" in line: continue
+                    parts = line.split(':', 3)
+                    if len(parts) >= 3:
+                        ssid = parts[0] if parts[0] else "<Hidden>"
+                        bssid = parts[1]
+                        ch = parts[2]
+                        pwr = parts[3] if len(parts) > 3 else "N/A"
+                        networks.append({
+                            "ssid": ssid,
+                            "bssid": bssid,
+                            "ch": ch,
+                            "pwr": pwr,
+                            "enc": "WPA/WPA2"
+                        })
+        except:
             pass
 
-        if not networks or all(n.get("ch") == "N/A" for n in networks):
-            # Fallback to iwlist (excellent for channels)
+        if not networks:
             networks = NetworkScanner._scan_with_iwlist()
 
-        return networks or [{"ssid": "No networks (run as root / check adapter)", "bssid": "N/A", "enc": "N/A", "pwr": "N/A", "ch": "N/A"}]
+        if not networks:
+            networks = [{"ssid": "No networks (run as root / check adapter)", "bssid": "N/A", "ch": "N/A", "pwr": "N/A", "enc": "N/A"}]
+
+        return networks
 
     @staticmethod
     def _scan_with_iwlist():
-        """Fallback using iwlist for reliable channel detection."""
+        """Improved iwlist fallback with sudo attempt"""
         try:
             interfaces = NetworkScanner.get_interfaces()
-            iface = next((i for i in interfaces if 'wlan' in i or 'wifi' in i), interfaces[0] if interfaces else "wlan0")
-            
-            result = subprocess.run(["iwlist", iface, "scan"], 
-                                  capture_output=True, text=True, timeout=15)
-            output = result.stdout
-        except Exception:
-            return [{"ssid": "iwlist failed (need root/monitor mode?)", "bssid": "N/A", "enc": "N/A", "pwr": "N/A", "ch": "N/A"}]
+            iface = next((i for i in interfaces if 'wlan' in i.lower()), interfaces[0])
 
-        networks = []
-        current = {}
-        for line in output.splitlines():
-            line = line.strip()
-            if "Cell " in line and current:
+            # Try with sudo first
+            cmd = ["sudo", "iwlist", iface, "scan"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            
+            if result.returncode != 0:
+                # Try without sudo (may fail)
+                result = subprocess.run(["iwlist", iface, "scan"], capture_output=True, text=True, timeout=15)
+
+            output = result.stdout
+            if not output.strip():
+                return []
+
+            # Better parsing
+            networks = []
+            current = {}
+            for line in output.splitlines():
+                line = line.strip()
+                if "Cell" in line and current:
+                    if current.get("ssid"):
+                        networks.append(current)
+                    current = {}
+                if "Address:" in line:
+                    current["bssid"] = line.split("Address: ")[-1].strip()
+                if "ESSID:" in line:
+                    current["ssid"] = line.split("ESSID:")[-1].strip('"')
+                if "Channel:" in line:
+                    m = re.search(r'Channel:(\d+)', line)
+                    current["ch"] = m.group(1) if m else "N/A"
+                if "Signal" in line or "Quality" in line:
+                    m = re.search(r'Signal level=([-\d]+)', line) or re.search(r'Quality=(\d+)', line)
+                    current["pwr"] = m.group(1) if m else "N/A"
+            if current.get("ssid"):
                 networks.append(current)
-                current = {}
-            if "Address:" in line:
-                current["bssid"] = line.split("Address: ")[-1]
-            if "ESSID:" in line:
-                current["ssid"] = line.split("ESSID:")[-1].strip('"')
-            if "Channel:" in line:
-                ch_m = re.search(r'Channel:(\d+)', line)
-                current["ch"] = ch_m.group(1) if ch_m else "N/A"
-            if "Signal level" in line or "Quality" in line:
-                sig_m = re.search(r'Signal level=([-\d]+)', line) or re.search(r'Quality=(\d+)', line)
-                current["pwr"] = sig_m.group(1) if sig_m else "N/A"
-            if "Encryption key:" in line:
-                current["enc"] = "WPA/WPA2" if "on" in line else "Open"
-        if current:
-            networks.append(current)
-        return networks
+            return networks
+        except Exception as e:
+            print(f"[!] iwlist scan failed: {e}")
+            return []
