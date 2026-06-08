@@ -21,13 +21,24 @@ class InterfaceManager:
     
     @staticmethod
     def enable_monitor_mode(interface):
-        """Enable monitor mode on interface"""
+        """Enable monitor mode on interface using nmcli + iw"""
         try:
+            # Tell NetworkManager to stop managing this interface
+            subprocess.run(["nmcli", "device", "set", interface, "managed", "no"], 
+                         check=True, stderr=subprocess.DEVNULL)
+            
+            # Bring interface down
             subprocess.run(["ip", "link", "set", interface, "down"], check=True)
-            subprocess.run(["iwconfig", interface, "mode", "Monitor"], check=True)
+            
+            # Set monitor mode using modern iw command
+            subprocess.run(["iw", interface, "set", "monitor"], check=True)
+            
+            # Bring interface back up
             subprocess.run(["ip", "link", "set", interface, "up"], check=True)
+            
             return True
-        except:
+        except Exception as e:
+            print(f"[!] Failed to enable monitor mode: {e}")
             return False
     
     @staticmethod
@@ -35,8 +46,14 @@ class InterfaceManager:
         """Disable monitor mode on interface"""
         try:
             subprocess.run(["ip", "link", "set", interface, "down"], check=True)
-            subprocess.run(["iwconfig", interface, "mode", "Managed"], check=True)
+            subprocess.run(["iw", interface, "set", "managed"], check=True)
             subprocess.run(["ip", "link", "set", interface, "up"], check=True)
+            
+            # Give control back to NetworkManager
+            subprocess.run(["nmcli", "device", "set", interface, "managed", "yes"], 
+                         check=True, stderr=subprocess.DEVNULL)
+            
             return True
-        except:
+        except Exception as e:
+            print(f"[!] Failed to disable monitor mode: {e}")
             return False
