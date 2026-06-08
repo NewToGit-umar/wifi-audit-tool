@@ -12,16 +12,22 @@ class PasswordCracker:
         self.found_password = None
 
     def crack_password(self):
+        """
+        Perform actual WPA/WPA2 password cracking using aircrack-ng.
+        Yields output lines as they come.
+        """
         if not os.path.exists(self.wordlist):
             yield f"[!] Error: Wordlist '{self.wordlist}' not found"
             return
+
         if not os.path.exists(self.cap_file):
             yield f"[!] Error: Capture file '{self.cap_file}' not found"
             return
 
         yield f"[*] Starting aircrack-ng on {os.path.basename(self.cap_file)}"
-        yield f"[*] Wordlist: {os.path.basename(self.wordlist)}"
-        yield "[*] Cracking... (this can take time)"
+        yield f"[*] Using wordlist: {os.path.basename(self.wordlist)}"
+        yield f"[*] This may take a few minutes..."
+        yield ""
 
         try:
             cmd = ["aircrack-ng", "-w", self.wordlist, self.cap_file]
@@ -37,19 +43,26 @@ class PasswordCracker:
                 line = line.strip()
                 if line:
                     yield line
+                    # Check for successful password
                     if "KEY FOUND" in line:
+                        # Extract password from output
                         match = re.search(r"\[(.+?)\]", line)
                         if match:
                             self.found_password = match.group(1)
-                            yield f"\n[+] SUCCESS! PASSWORD: {self.found_password}"
-                            break
+                            yield f"\n[+] PASSWORD CRACKED: {self.found_password}"
+                            self.process.terminate()
+                            return
 
+            # Check if process finished with errors
             if self.process.returncode != 0:
                 stderr = self.process.stderr.read()
                 if stderr:
-                    yield f"[!] Error: {stderr.strip()}"
+                    yield f"[!] Error: {stderr}"
+            else:
+                yield "[*] Aircrack-ng finished (no password found with this wordlist)"
+
         except FileNotFoundError:
-            yield "[!] aircrack-ng not found. Install with: sudo apt install aircrack-ng"
+            yield "[!] Error: aircrack-ng not found. Please install aircrack-ng suite."
         except Exception as e:
             yield f"[!] Exception: {str(e)}"
 

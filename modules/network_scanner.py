@@ -1,116 +1,112 @@
 ﻿import subprocess
 import re
 import sys
-import os
 
 class NetworkScanner:
     @staticmethod
     def get_interfaces():
-        """Get wireless interfaces."""
+        """Get available network interfaces."""
         try:
-            # Prefer wireless interfaces
-            result = subprocess.run(["iwconfig"], capture_output=True, text=True, timeout=10)
+            result = subprocess.run(["ip", "link", "show"], capture_output=True, text=True, check=True)
             interfaces = []
-            for line in result.stdout.splitlines():
-                if "no wireless extensions" not in line and ":" in line:
-                    iface = line.split()[0].strip()
-                    if iface:
+            for line in result.stdout.split('\n'):
+                if ':' in line and not line.startswith(' '):
+                    iface = line.split(':')[1].strip()
+                    if iface and not iface.startswith('lo'):
                         interfaces.append(iface)
-            if not interfaces:
-                # fallback
-                result = subprocess.run(["ip", "link", "show"], capture_output=True, text=True)
-                for line in result.stdout.split('\n'):
-                    if ':' in line and not line.startswith(' '):
-                        iface = line.split(':')[1].strip().split()[0]
-                        if iface and not iface.startswith(('lo', 'eth', 'enp')):
-                            interfaces.append(iface)
-            return interfaces or ["wlan0"]
-        except:
-            return ["wlan0"]
+            return interfaces
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return []
 
     @staticmethod
     def scan_networks():
+        """Scans for WiFi networks cross-platform."""
         if sys.platform == 'win32':
             return NetworkScanner._scan_windows()
-        return NetworkScanner._scan_linux()
+        else:
+            return NetworkScanner._scan_linux()
 
     @staticmethod
     def _scan_linux():
-        networks = []
         try:
-            # Primary: Try nmcli (works without monitor mode)
-            result = subprocess.run(
-                ["nmcli", "-t", "-f", "SSID,BSSID,CHAN,SIGNAL", "dev", "wifi"],
-                capture_output=True, text=True, timeout=12, check=False
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                for line in result.stdout.strip().split('\n'):
-                    if not line or "SSID" in line: continue
-                    parts = line.split(':', 3)
-                    if len(parts) >= 3:
-                        ssid = parts[0] if parts[0] else "<Hidden>"
-                        bssid = parts[1]
-                        ch = parts[2]
-                        pwr = parts[3] if len(parts) > 3 else "N/A"
-                        networks.append({
-                            "ssid": ssid,
-                            "bssid": bssid,
-                            "ch": ch,
-                            "pwr": pwr,
-                            "enc": "WPA/WPA2"
-                        })
-        except:
-            pass
+            # nmcli -t -f BSSID,FREQ,SIGNAL,SECURITY,SSID dev wifi
+            result = subprocess.run(["nmcli", "-t", "-f", "BSSID,SIGNAL,SECURITY,SSID,CHAN", "dev", "wifi"], 
+                                    capture_output=True, text=True, check=True)
+            output = result.stdout
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return [{"ssid": "Error (Need nmcli)", "bssid": "N/A", "enc": "N/A", "pwr": "N/A", "ch": "N/A"}]
 
-        if not networks:
-            networks = NetworkScanner._scan_with_iwlist()
-
-        if not networks:
-            networks = [{"ssid": "No networks (run as root / check adapter)", "bssid": "N/A", "ch": "N/A", "pwr": "N/A", "enc": "N/A"}]
-
+        networks = []
+        for line in output.split('\n'):
+            if not line.strip(): continue
+            parts = line.split(':')
+            if len(parts) >= 8: # nmcli escapes colons in MAC addresses, splitting gives more parts
+                # Reconstruct MAC
+                bssid = ":".join(parts[0:6])
+                pwr = parts[6]
+                enc = parts[7]
+                ssid = parts[8] if len(parts) > 8 else "<Hidden>"
+                ch = parts[9] if len(parts) > 9 else "0"
+                networks.append({"ssid": ssid, "bssid": bssid, "enc": enc, "pwr": pwr, "ch": ch})
         return networks
 
     @staticmethod
-    def _scan_with_iwlist():
-        """Improved iwlist fallback with sudo attempt"""
+    def _scan_windows():
         try:
-            interfaces = NetworkScanner.get_interfaces()
-            iface = next((i for i in interfaces if 'wlan' in i.lower()), interfaces[0])
-
-            # Try with sudo first
-            cmd = ["sudo", "iwlist", iface, "scan"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            
-            if result.returncode != 0:
-                # Try without sudo (may fail)
-                result = subprocess.run(["iwlist", iface, "scan"], capture_output=True, text=True, timeout=15)
-
+            # Run the netsh command to get detailed BSSID info
+            result = subprocess.run(["netsh", "wlan", "show", "networks", "mode=bssid"], 
+                                    capture_output=True, text=True, check=True)
             output = result.stdout
-            if not output.strip():
-                return []
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return [{"ssid": "Error", "bssid": "N/A", "enc": "N/A", "pwr": "N/A", "ch": "N/A"}]
 
-            # Better parsing
-            networks = []
-            current = {}
-            for line in output.splitlines():
-                line = line.strip()
-                if "Cell" in line and current:
-                    if current.get("ssid"):
-                        networks.append(current)
-                    current = {}
-                if "Address:" in line:
-                    current["bssid"] = line.split("Address: ")[-1].strip()
-                if "ESSID:" in line:
-                    current["ssid"] = line.split("ESSID:")[-1].strip('"')
-                if "Channel:" in line:
-                    m = re.search(r'Channel:(\d+)', line)
-                    current["ch"] = m.group(1) if m else "N/A"
-                if "Signal" in line or "Quality" in line:
-                    m = re.search(r'Signal level=([-\d]+)', line) or re.search(r'Quality=(\d+)', line)
-                    current["pwr"] = m.group(1) if m else "N/A"
-            if current.get("ssid"):
-                networks.append(current)
-            return networks
-        except Exception as e:
-            print(f"[!] iwlist scan failed: {e}")
-            return []
+        networks = []
+        current_ssid = ""
+        current_enc = ""
+
+        # Parse the output line by line
+        for line in output.split('\n'):
+            line = line.strip()
+            
+            if line.startswith("SSID"):
+                match = re.match(r"SSID\s+\d+\s+:\s*(.*)", line)
+                if match:
+                    current_ssid = match.group(1).strip()
+                    if not current_ssid:
+                        current_ssid = "<Hidden SSID>"
+            
+            elif line.startswith("Authentication"):
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    current_enc = parts[1].strip()
+                    
+            elif line.startswith("Encryption"):
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    current_enc += f" / {parts[1].strip()}"
+                    
+            elif line.startswith("BSSID"):
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    bssid = parts[1].strip()
+                    networks.append({
+                        "ssid": current_ssid,
+                        "bssid": bssid,
+                        "enc": current_enc,
+                        "pwr": "N/A",
+                        "ch": "N/A"
+                    })
+                    
+            elif line.startswith("Signal"):
+                if networks: # Apply to the most recently added BSSID
+                    parts = line.split(":", 1)
+                    if len(parts) > 1:
+                        networks[-1]["pwr"] = parts[1].strip()
+                        
+            elif line.startswith("Channel"):
+                if networks:
+                    parts = line.split(":", 1)
+                    if len(parts) > 1:
+                        networks[-1]["ch"] = parts[1].strip()
+
+        return networks

@@ -270,9 +270,9 @@ class CrackerTab(QWidget):
         bssid = self.table.item(row, 1).text()
         channel = self.table.item(row, 2).text()
         
-        if channel in ("N/A", "") or not channel.isdigit():
-         self.terminal.setText("[!] Error: Channel information missing. Try refreshing scan or using airodump-ng manually.")
-        return
+        if channel == "N/A":
+            self.terminal.setText("[!] Error: Channel information missing.")
+            return
         
         interface = self.combo_interface.currentText()
         
